@@ -1,4 +1,3 @@
-<<<<<<< HEAD
 # TypeSet
 Opensource Latex based editor
 =======
@@ -172,4 +171,3 @@ No paid signing credentials, notarization, app-store account, or automatic-updat
 The renderer runs with context isolation and no direct Node.js access. Compilation uses a copied project snapshot in an unprivileged container with networking disabled; it does not bind-mount your project or home directory. Only successful PDF builds replace the preview. Source, PDF, and credentials stay local until you explicitly use a connected service.
 
 Typeset's source is available under the [MIT license](LICENSE). Third-party libraries, TeX packages, and fonts retain their respective open-source licenses.
->>>>>>> a5bae36 (First commit)
