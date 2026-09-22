@@ -1,0 +1,48 @@
+FROM docker.io/library/debian:bookworm-slim
+
+LABEL org.opencontainers.image.title="Typeset LaTeX compiler" \
+      org.opencontainers.image.description="Offline TeX Live compiler for Typeset desktop"
+
+ENV DEBIAN_FRONTEND=noninteractive \
+    LANG=C.UTF-8 \
+    LC_ALL=C.UTF-8
+
+# Debian's packages contain free software and fonts. No proprietary compiler,
+# subscription, hosted compilation service, or Docker installation is required.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      latexmk texlive-latex-base texlive-latex-recommended texlive-latex-extra \
+      texlive-fonts-recommended texlive-pictures texlive-science \
+      texlive-xetex texlive-luatex texlive-bibtex-extra biber \
+      fonts-lmodern fonts-dejavu-core fontconfig ca-certificates \
+    && rm -rf /var/lib/apt/lists/* \
+    && useradd --uid 1000 --create-home compiler \
+    && mkdir -p /workspace/project /workspace/build \
+    && chown -R 1000:1000 /workspace
+
+# Common resume templates use Lato and Font Awesome 5 Free, provided by this
+# Debian main-repository collection. No Font Awesome Pro assets are installed.
+RUN sed -i 's|http://deb.debian.org|https://deb.debian.org|g' /etc/apt/sources.list.d/debian.sources \
+    && apt-get -o Acquire::Retries=2 -o Acquire::https::Timeout=30 update \
+    && apt-get -o Acquire::Retries=2 -o Acquire::https::Timeout=30 install -y --no-install-recommends \
+      texlive-fonts-extra fonts-lato \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY compile.sh /usr/local/bin/typeset-compile
+RUN chmod 755 /usr/local/bin/typeset-compile
+
+# Build the LuaTeX font index once; per-compile containers can read this system
+# cache without a costly font scan on each PDF refresh.
+RUN TEXMFVAR=/var/lib/texmf luaotfload-tool --update --force
+
+ENV HOME=/tmp \
+    TEXMFVAR=/tmp/texmf-var \
+    TEXMFCONFIG=/tmp/texmf-config \
+    openin_any=p \
+    openout_any=p \
+    shell_escape=f
+
+USER 1000:1000
+WORKDIR /workspace/project
+ENTRYPOINT ["/usr/local/bin/typeset-compile"]
+
+LABEL org.typeset.compiler-revision="2"
