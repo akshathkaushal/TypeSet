@@ -178,6 +178,15 @@ export function gitPullFailureMessage(detail: string): string {
 export class GitService {
   private locks = new Map<string, Promise<unknown>>();
 
+  constructor(
+    private readonly options: {
+      networkEnvironment?: (
+        root: string,
+        environment: NodeJS.ProcessEnv,
+      ) => Promise<NodeJS.ProcessEnv>;
+    } = {},
+  ) {}
+
   private async serialize<T>(
     root: string,
     action: () => Promise<T>,
@@ -225,13 +234,19 @@ export class GitService {
     extra: string[] = [],
     timeout = 120_000,
   ): Promise<string> {
+    const httpsNetwork =
+      ["clone", "fetch", "push"].includes(args[0]) &&
+      args.some((argument) => argument.startsWith("https://github.com/"));
     try {
+      let env = gitEnvironment();
+      if (httpsNetwork && this.options.networkEnvironment)
+        env = await this.options.networkEnvironment(root, env);
       const result = await execute(
         "git",
         [...this.baseArgs(), ...extra, ...args],
         {
           cwd: root,
-          env: gitEnvironment(),
+          env,
           shell: false,
           windowsHide: true,
           timeout,
@@ -260,9 +275,6 @@ export class GitService {
       )
         .trim()
         .replace(/https:\/\/[^\s/@]+:[^\s/@]+@/g, "https://[redacted]@");
-      const httpsNetwork =
-        ["clone", "fetch", "push"].includes(args[0]) &&
-        args.some((argument) => argument.startsWith("https://github.com/"));
       throw new Error(
         gitFailureMessage(detail || "The Git command failed.", httpsNetwork),
       );

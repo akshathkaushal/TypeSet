@@ -112,6 +112,48 @@ afterEach(async () => {
 });
 
 describe("persistent host terminal", () => {
+  it("passes prepared proxy settings to the shell and refreshes them on restart", async () => {
+    const { root } = await fixture();
+    let proxy = "http://first.example:80";
+    const prepareEnvironment = vi.fn(async (_root, env) => ({
+      ...env,
+      GIT_CONFIG_COUNT: "1",
+      GIT_CONFIG_KEY_0: "http.https://github.com/.proxy",
+      GIT_CONFIG_VALUE_0: proxy,
+    }));
+    const { instance, spawn } = service({ prepareEnvironment });
+    await instance.start(root);
+    expect(spawn.mock.calls[0][2].env).toMatchObject({
+      GIT_CONFIG_VALUE_0: proxy,
+      GIT_TERMINAL_PROMPT: "1",
+      PWD: root,
+    });
+    await instance.start(root);
+    expect(prepareEnvironment).toHaveBeenCalledTimes(1);
+    await instance.stop();
+    proxy = "http://second.example:80";
+    await instance.start(root);
+    expect(spawn.mock.calls[1][2].env.GIT_CONFIG_VALUE_0).toBe(proxy);
+  });
+
+  it("does not launch a stale terminal after waiting for system proxy resolution", async () => {
+    const { root } = await fixture();
+    let complete!: (env: NodeJS.ProcessEnv) => void;
+    const prepareEnvironment = vi.fn(
+      () =>
+        new Promise<NodeJS.ProcessEnv>((resolve) => {
+          complete = resolve;
+        }),
+    );
+    const { instance, spawn } = service({ prepareEnvironment });
+    const starting = instance.start(root);
+    await vi.waitFor(() => expect(prepareEnvironment).toHaveBeenCalled());
+    await instance.stop();
+    complete({ PATH: "/usr/bin:/bin" });
+    await expect(starting).rejects.toThrow("cancelled");
+    expect(spawn).not.toHaveBeenCalled();
+  });
+
   it("starts a login shell in the project and reuses the same live session", async () => {
     const { root } = await fixture();
     const { instance, spawn, ptys } = service();

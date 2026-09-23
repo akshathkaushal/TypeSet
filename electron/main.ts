@@ -16,6 +16,7 @@ import { pathToFileURL } from "node:url";
 import { ProjectService, atomicWrite } from "./services/projects";
 import { CompilerService } from "./services/compiler";
 import { GitService } from "./services/git";
+import { systemGitEnvironment } from "./services/gitProxy";
 import { DriveService } from "./services/drive";
 import { TerminalService } from "./services/terminal";
 import type { AppState, Project, Settings, TypesetAPI } from "../shared/types";
@@ -37,10 +38,15 @@ app.setName("Typeset");
 let win: BrowserWindow;
 let current: Project | undefined;
 const projects = new ProjectService();
-const git = new GitService();
+const prepareGitEnvironment = (root: string, environment: NodeJS.ProcessEnv) =>
+  systemGitEnvironment(root, environment, (url) =>
+    session.defaultSession.resolveProxy(url),
+  );
+const git = new GitService({ networkEnvironment: prepareGitEnvironment });
 let compiler: CompilerService;
 let drive: DriveService;
 const terminal = new TerminalService({
+  prepareEnvironment: prepareGitEnvironment,
   onData: (event) => {
     if (win && !win.isDestroyed())
       win.webContents.send("typeset:terminal-data", event);

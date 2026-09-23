@@ -74,6 +74,8 @@ Typeset saves pending editor changes before sending Enter or a pasted multiline 
 
 Hiding the terminal keeps its shell, output, and running commands. **Clear terminal** clears scrollback; **Restart terminal** ends the current session and starts a new shell. Switching projects or quitting Typeset ends the embedded session and its jobs. On macOS, **Open in Terminal** in the panel, or **View → Open project in Terminal**, opens the project in Apple's Terminal app. That separate terminal keeps running independently of Typeset. The embedded terminal uses the free, MIT-licensed xterm.js and node-pty libraries. Native terminal integration is macOS-only; Windows and Linux still require native testing.
 
+For GitHub HTTPS connections, Typeset resolves your operating system's proxy/PAC settings for new embedded terminal sessions and the built-in Sync commands. It uses the first system route as a process-only Git setting, without changing global or project configuration. Explicit Git proxy settings and inherited HTTPS/ALL proxy environment variables take precedence. After changing networks or VPN connections, use **Restart terminal** to refresh its route. A separately opened macOS Terminal uses its own environment.
+
 ## Versions and GitHub
 
 **Save a version** creates a named Git commit on your computer. History supports comparing changes and restoring an earlier version. Restore saves changed tracked/untracked source in a safety checkpoint first, then records the restoration as a new commit. Git ignore rules still apply: ignored files are not part of checkpoints. GitHub is not needed for local history.

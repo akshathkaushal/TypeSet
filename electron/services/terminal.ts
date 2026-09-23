@@ -72,6 +72,10 @@ interface TerminalOptions {
   environment?: NodeJS.ProcessEnv;
   homeDirectory?: string;
   userShell?: string;
+  prepareEnvironment?: (
+    root: string,
+    environment: NodeJS.ProcessEnv,
+  ) => Promise<NodeJS.ProcessEnv>;
   listProcesses?: () => Promise<TerminalProcess[]>;
   signalProcess?: (pid: number, signal: NodeJS.Signals) => void;
   launchNative?: (file: string, args: string[], cwd: string) => Promise<void>;
@@ -308,11 +312,20 @@ export class TerminalService {
     }
     checkCurrent();
     const shell = this.selectShell();
-    const env = terminalEnvironment(
+    let env = terminalEnvironment(
       this.environment,
       this.options.homeDirectory ?? os.homedir(),
       this.platform,
     );
+    if (this.options.prepareEnvironment) {
+      const prepared = await this.options.prepareEnvironment(cwd, env);
+      env = Object.fromEntries(
+        Object.entries(prepared).filter(
+          (entry): entry is [string, string] => typeof entry[1] === "string",
+        ),
+      );
+      checkCurrent();
+    }
     env.PWD = cwd;
     if (this.platform !== "win32") env.SHELL = shell;
     const pty = spawn(shell, this.platform === "win32" ? ["-NoLogo"] : ["-l"], {
