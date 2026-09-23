@@ -42,6 +42,12 @@ import {
 import Editor from "./components/Editor";
 import PdfViewer from "./components/PdfViewer";
 import TerminalPanel from "./components/TerminalPanel";
+import ResizeHandle from "./components/ResizeHandle";
+import {
+  DEFAULT_LAYOUT,
+  useElementSize,
+  useWorkspaceLayout,
+} from "./lib/workspaceLayout";
 import { reconcileDocumentText } from "./lib/documentSync";
 import type {
   CompilerStatus,
@@ -151,8 +157,27 @@ export default function App() {
   const [cursor, setCursor] = useState({ line: 1, column: 1 });
   const [goToLine, setGoToLine] = useState<{ line: number; nonce: number }>();
   const [savedAt, setSavedAt] = useState("All changes saved");
-  const [split, setSplit] = useState(51);
-  const splitRef = useRef<HTMLDivElement>(null);
+  const { layout, resize } = useWorkspaceLayout();
+  const [bodyRef, bodySize] = useElementSize<HTMLDivElement>();
+  const [panesRef, panesSize] = useElementSize<HTMLDivElement>();
+  const [splitRef, splitSize] = useElementSize<HTMLDivElement>();
+  const sidebarMax = Math.max(
+    180,
+    Math.min(460, (bodySize.width || window.innerWidth) - 608),
+  );
+  const sidebarWidth = Math.min(layout.sidebar, sidebarMax);
+  const editorSpace = Math.max(1, splitSize.width - 8);
+  const editorMin = Math.min(45, Math.max(15, (220 / editorSpace) * 100));
+  const editorSplit = Math.max(
+    editorMin,
+    Math.min(100 - editorMin, layout.editor),
+  );
+  const panelMax = Math.max(
+    120,
+    (panesSize.height || window.innerHeight - 210) - 188,
+  );
+  const bottomPanel = showTerminal ? "terminal" : showLogs ? "logs" : null;
+  const panelHeight = Math.min(layout[bottomPanel ?? "terminal"], panelMax);
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const compileTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const saveChain = useRef(Promise.resolve());
@@ -810,27 +835,6 @@ export default function App() {
   const words =
     selected?.content.trim().split(/\s+/).filter(Boolean).length || 0;
   const ready = compiler?.running && compiler.imageReady;
-  const startResize = (event: React.PointerEvent) => {
-    event.preventDefault();
-    event.currentTarget.setPointerCapture(event.pointerId);
-    const element = splitRef.current;
-    if (!element) return;
-    const move = (e: PointerEvent) => {
-      const bounds = element.getBoundingClientRect();
-      setSplit(
-        Math.max(
-          30,
-          Math.min(70, ((e.clientX - bounds.left) / bounds.width) * 100),
-        ),
-      );
-    };
-    const end = () => {
-      window.removeEventListener("pointermove", move);
-      window.removeEventListener("pointerup", end);
-    };
-    window.addEventListener("pointermove", move);
-    window.addEventListener("pointerup", end);
-  };
 
   if (!api)
     return (
@@ -857,7 +861,7 @@ export default function App() {
           Local & private
         </span>
       </header>
-      <div className="app-body" inert={!!busy}>
+      <div className="app-body" inert={!!busy} ref={bodyRef}>
         <nav className="activity-rail" aria-label="Workspace views">
           <button
             className="brand-mark"
@@ -910,7 +914,11 @@ export default function App() {
           </div>
         </nav>
         {sidebar && (
-          <aside className="sidebar">
+          <aside
+            className="sidebar"
+            id="project-sidebar"
+            style={{ width: sidebarWidth }}
+          >
             <div className="project-switcher">
               <button className="project-button" onClick={() => setMenu(!menu)}>
                 <span className="project-initial">
@@ -1392,6 +1400,18 @@ export default function App() {
             )}
           </aside>
         )}
+        {sidebar && (
+          <ResizeHandle
+            label="Resize sidebar"
+            controls="project-sidebar"
+            orientation="vertical"
+            value={sidebarWidth}
+            min={180}
+            max={sidebarMax}
+            onChange={(value) => resize("sidebar", value)}
+            onReset={() => resize("sidebar", DEFAULT_LAYOUT.sidebar)}
+          />
+        )}
         <main className="workspace">
           <div className="workspace-header">
             <div className="workspace-heading">
@@ -1488,217 +1508,255 @@ export default function App() {
               </button>
             </div>
           </div>
-          <div className="split-workspace" ref={splitRef}>
-            <section className="source-pane" style={{ width: `${split}%` }}>
-              <div className="file-tabs">
-                {documents.map((doc) => (
-                  <div
-                    className={`file-tab ${active === doc.path ? "active" : ""}`}
-                    key={doc.path}
-                  >
-                    <button onClick={() => setActive(doc.path)}>
-                      <FileText size={13} />
-                      <span>{doc.path.split("/").pop()}</span>
-                      {doc.dirty && <span className="unsaved-dot" />}
-                    </button>
-                    <button
-                      className="close-tab"
-                      title={`Close ${doc.path}`}
-                      onClick={() => void closeTab(doc.path)}
+          <div className="workspace-panes" ref={panesRef}>
+            <div className="split-workspace" ref={splitRef}>
+              <section
+                className="source-pane"
+                id="source-pane"
+                style={{ flex: `${editorSplit} 1 0px` }}
+              >
+                <div className="file-tabs">
+                  {documents.map((doc) => (
+                    <div
+                      className={`file-tab ${active === doc.path ? "active" : ""}`}
+                      key={doc.path}
                     >
-                      <X size={12} />
-                    </button>
-                  </div>
-                ))}
-                <button
-                  className="tab-add"
-                  title="New file"
-                  onClick={() => openModal("new-file")}
-                >
-                  <Plus size={14} />
-                </button>
-              </div>
-              {selected?.conflict && (
-                <div className="external-change-banner" role="alert">
-                  <p>
-                    {selected.conflict === "deleted"
-                      ? "This file was removed outside Typeset."
-                      : "This file changed outside Typeset."}{" "}
-                    Your editor contents are preserved.
-                  </p>
-                  <div>
-                    {selected.conflict !== "deleted" && (
+                      <button onClick={() => setActive(doc.path)}>
+                        <FileText size={13} />
+                        <span>{doc.path.split("/").pop()}</span>
+                        {doc.dirty && <span className="unsaved-dot" />}
+                      </button>
+                      <button
+                        className="close-tab"
+                        title={`Close ${doc.path}`}
+                        onClick={() => void closeTab(doc.path)}
+                      >
+                        <X size={12} />
+                      </button>
+                    </div>
+                  ))}
+                  <button
+                    className="tab-add"
+                    title="New file"
+                    onClick={() => openModal("new-file")}
+                  >
+                    <Plus size={14} />
+                  </button>
+                </div>
+                {selected?.conflict && (
+                  <div className="external-change-banner" role="alert">
+                    <p>
+                      {selected.conflict === "deleted"
+                        ? "This file was removed outside Typeset."
+                        : "This file changed outside Typeset."}{" "}
+                      Your editor contents are preserved.
+                    </p>
+                    <div>
+                      {selected.conflict !== "deleted" && (
+                        <button
+                          className="secondary"
+                          onClick={() => void useDiskVersion(selected.path)}
+                        >
+                          Use disk version
+                        </button>
+                      )}
                       <button
                         className="secondary"
-                        onClick={() => void useDiskVersion(selected.path)}
+                        onClick={() => saveEditsAsCopy(selected.path)}
                       >
-                        Use disk version
+                        Save edits as copy
                       </button>
-                    )}
-                    <button
-                      className="secondary"
-                      onClick={() => saveEditsAsCopy(selected.path)}
-                    >
-                      Save edits as copy
-                    </button>
-                    {selected.conflict === "deleted" && !selected.dirty && (
+                      {selected.conflict === "deleted" && !selected.dirty && (
+                        <button
+                          className="text-button"
+                          onClick={() => void closeTab(selected.path)}
+                        >
+                          Close file
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                )}
+                {selected?.kind === "text" ? (
+                  <Editor
+                    key={project?.root}
+                    path={active}
+                    value={selected.content}
+                    onChange={changeContent}
+                    onCursorChange={(line, column) =>
+                      setCursor({ line, column })
+                    }
+                    fontSize={settings.fontSize}
+                    dark={settings.theme === "dark"}
+                    goToLine={goToLine}
+                  />
+                ) : selected?.kind === "image" ? (
+                  <div className="asset-preview">
+                    <img alt={active} src={selected.url} />
+                    <p>{active}</p>
+                  </div>
+                ) : (
+                  <div className="editor-empty">
+                    <FileText size={34} />
+                    <h2>
+                      {selected ? "Project asset" : "Find your next words."}
+                    </h2>
+                    <p>
+                      {selected
+                        ? "This file is included when your project compiles."
+                        : "Choose a file from the sidebar, or create a new one."}
+                    </p>
+                    {!selected && (
                       <button
-                        className="text-button"
-                        onClick={() => void closeTab(selected.path)}
+                        className="secondary"
+                        onClick={() => openModal("new-file")}
                       >
-                        Close file
+                        <Plus size={15} />
+                        New file
                       </button>
                     )}
                   </div>
+                )}
+                <div className="editor-footer">
+                  <span>
+                    <CheckCheck size={13} />
+                    {savedAt}
+                  </span>
+                  <span>
+                    Ln {cursor.line}, Col {cursor.column}
+                  </span>
                 </div>
-              )}
-              {selected?.kind === "text" ? (
-                <Editor
-                  key={project?.root}
-                  path={active}
-                  value={selected.content}
-                  onChange={changeContent}
-                  onCursorChange={(line, column) => setCursor({ line, column })}
-                  fontSize={settings.fontSize}
-                  dark={settings.theme === "dark"}
-                  goToLine={goToLine}
-                />
-              ) : selected?.kind === "image" ? (
-                <div className="asset-preview">
-                  <img alt={active} src={selected.url} />
-                  <p>{active}</p>
-                </div>
-              ) : (
-                <div className="editor-empty">
-                  <FileText size={34} />
-                  <h2>
-                    {selected ? "Project asset" : "Find your next words."}
-                  </h2>
-                  <p>
-                    {selected
-                      ? "This file is included when your project compiles."
-                      : "Choose a file from the sidebar, or create a new one."}
-                  </p>
-                  {!selected && (
-                    <button
-                      className="secondary"
-                      onClick={() => openModal("new-file")}
-                    >
-                      <Plus size={15} />
-                      New file
-                    </button>
-                  )}
-                </div>
-              )}
-              <div className="editor-footer">
-                <span>
-                  <CheckCheck size={13} />
-                  {savedAt}
-                </span>
-                <span>
-                  Ln {cursor.line}, Col {cursor.column}
-                </span>
-              </div>
-            </section>
-            <div
-              className="split-handle"
-              onPointerDown={startResize}
-              role="separator"
-              aria-label="Resize editor and preview"
-              aria-orientation="vertical"
-              aria-valuenow={split}
-              tabIndex={0}
-              onKeyDown={(e) => {
-                if (e.key === "ArrowLeft") setSplit((n) => Math.max(30, n - 2));
-                if (e.key === "ArrowRight")
-                  setSplit((n) => Math.min(70, n + 2));
-              }}
-            />
-            <section
-              className="preview-pane"
-              style={{ width: `${100 - split}%` }}
-            >
-              <PdfViewer
-                data={pdf}
-                revision={pdfRevision}
-                dark={settings.theme === "dark"}
-                onError={(message) => notify(message, true)}
+              </section>
+              <ResizeHandle
+                label="Resize editor and preview"
+                controls="source-pane preview-pane"
+                orientation="vertical"
+                value={editorSplit}
+                min={editorMin}
+                max={100 - editorMin}
+                unit="percent"
+                step={2}
+                pixelsPerUnit={editorSpace / 100}
+                onChange={(value) => resize("editor", value)}
+                onReset={() => resize("editor", DEFAULT_LAYOUT.editor)}
               />
-              {compiling && (
-                <div className="compile-progress">
-                  <LoaderCircle size={14} className="spin" />
-                  Typesetting your document…
+              <section
+                className="preview-pane"
+                id="preview-pane"
+                style={{ flex: `${100 - editorSplit} 1 0px` }}
+              >
+                <PdfViewer
+                  data={pdf}
+                  revision={pdfRevision}
+                  dark={settings.theme === "dark"}
+                  onError={(message) => notify(message, true)}
+                />
+                {compiling && (
+                  <div className="compile-progress">
+                    <LoaderCircle size={14} className="spin" />
+                    Typesetting your document…
+                  </div>
+                )}
+              </section>
+            </div>
+            {bottomPanel && (
+              <ResizeHandle
+                key={bottomPanel}
+                label={
+                  bottomPanel === "terminal"
+                    ? "Resize terminal"
+                    : "Resize compilation output"
+                }
+                controls={
+                  bottomPanel === "terminal"
+                    ? "project-terminal"
+                    : "compilation-output"
+                }
+                orientation="horizontal"
+                direction={-1}
+                value={panelHeight}
+                min={120}
+                max={panelMax}
+                onChange={(value) => resize(bottomPanel, value)}
+                onReset={() => resize(bottomPanel, DEFAULT_LAYOUT[bottomPanel])}
+              />
+            )}
+            {bottomPanel === "logs" && (
+              <section
+                className="logs-panel"
+                id="compilation-output"
+                style={{ height: panelHeight }}
+              >
+                <div className="logs-heading">
+                  <div>
+                    <Terminal size={15} />
+                    <strong>Compilation output</strong>
+                    {result && (
+                      <span
+                        className={`pill ${result.success ? "connected" : "failed"}`}
+                      >
+                        {result.success ? "Successful" : "Needs attention"}
+                      </span>
+                    )}
+                  </div>
+                  <button
+                    className="icon-button"
+                    title="Close output"
+                    onClick={() => setShowLogs(false)}
+                  >
+                    <X size={16} />
+                  </button>
                 </div>
-              )}
-            </section>
-          </div>
-          {showLogs && (
-            <section className="logs-panel">
-              <div className="logs-heading">
-                <div>
-                  <Terminal size={15} />
-                  <strong>Compilation output</strong>
-                  {result && (
-                    <span
-                      className={`pill ${result.success ? "connected" : "failed"}`}
-                    >
-                      {result.success ? "Successful" : "Needs attention"}
-                    </span>
-                  )}
-                </div>
-                <button
-                  className="icon-button"
-                  title="Close output"
-                  onClick={() => setShowLogs(false)}
-                >
-                  <X size={16} />
-                </button>
-              </div>
-              {result?.diagnostics.map((diagnostic, index) => (
-                <button
-                  className={`diagnostic ${diagnostic.severity}`}
-                  key={index}
-                  onClick={() => {
-                    if (diagnostic.file) {
-                      const file = diagnostic.file.replace(/^\.\//, "");
-                      void openFile(file).then(() =>
+                {result?.diagnostics.map((diagnostic, index) => (
+                  <button
+                    className={`diagnostic ${diagnostic.severity}`}
+                    key={index}
+                    onClick={() => {
+                      if (diagnostic.file) {
+                        const file = diagnostic.file.replace(/^\.\//, "");
+                        void openFile(file).then(() =>
+                          setGoToLine({
+                            line: diagnostic.line || 1,
+                            nonce: Date.now(),
+                          }),
+                        );
+                      } else if (diagnostic.line)
                         setGoToLine({
-                          line: diagnostic.line || 1,
+                          line: diagnostic.line,
                           nonce: Date.now(),
-                        }),
-                      );
-                    } else if (diagnostic.line)
-                      setGoToLine({ line: diagnostic.line, nonce: Date.now() });
-                  }}
-                >
-                  {diagnostic.file &&
-                    `${diagnostic.file}${diagnostic.line ? `:${diagnostic.line}` : ""} — `}
-                  {diagnostic.message}
-                </button>
-              ))}
-              <pre>
-                {logs ||
-                  result?.log ||
-                  "Compile your document to see the output here."}
-              </pre>
-            </section>
-          )}
-          {project && terminalMounted && (
-            <TerminalPanel
-              key={project.root}
-              projectRoot={project.root}
-              visible={showTerminal}
-              onClose={() => setShowTerminal(false)}
-              onBeforeCommand={saveAll}
-              onRefresh={refreshFromDisk}
-              onError={(message) => notify(message, true)}
-              onOpenInTerminal={
-                navigator.platform.includes("Mac")
-                  ? openNativeTerminal
-                  : undefined
-              }
-            />
-          )}
+                        });
+                    }}
+                  >
+                    {diagnostic.file &&
+                      `${diagnostic.file}${diagnostic.line ? `:${diagnostic.line}` : ""} — `}
+                    {diagnostic.message}
+                  </button>
+                ))}
+                <pre>
+                  {logs ||
+                    result?.log ||
+                    "Compile your document to see the output here."}
+                </pre>
+              </section>
+            )}
+            {project && terminalMounted && (
+              <TerminalPanel
+                key={project.root}
+                projectRoot={project.root}
+                visible={showTerminal}
+                height={panelHeight}
+                onClose={() => setShowTerminal(false)}
+                onBeforeCommand={saveAll}
+                onRefresh={refreshFromDisk}
+                onError={(message) => notify(message, true)}
+                onOpenInTerminal={
+                  navigator.platform.includes("Mac")
+                    ? openNativeTerminal
+                    : undefined
+                }
+              />
+            )}
+          </div>
           <footer className="statusbar">
             <div>
               <button onClick={() => selectSide("history")}>

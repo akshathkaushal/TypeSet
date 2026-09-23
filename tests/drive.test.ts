@@ -73,6 +73,63 @@ afterEach(async () => {
 });
 
 describe("Google Drive desktop authentication", () => {
+  it("uses the supplied desktop transport for token refresh, Drive requests, and revocation", async () => {
+    await seedTokens(1);
+    const transport = vi.fn<typeof fetch>(async (url) =>
+      String(url).endsWith("/token")
+        ? json({ access_token: "renewed-access", expires_in: 3600 })
+        : String(url).endsWith("/revoke")
+          ? json({})
+          : json({ files: [] }),
+    );
+    options.fetch = transport;
+    expect(await drive.listSnapshots("project")).toEqual([]);
+    const apiRequest = transport.mock.calls.find(([url]) =>
+      String(url).includes("/drive/v3/files"),
+    );
+    expect(new Headers(apiRequest?.[1]?.headers).get("Authorization")).toBe(
+      "Bearer renewed-access",
+    );
+    await drive.disconnect();
+    expect(transport).toHaveBeenCalledTimes(3);
+    expect(request).not.toHaveBeenCalled();
+    for (const [, init] of transport.mock.calls) {
+      expect(init?.credentials).toBe("omit");
+      expect(init?.redirect).toBe("error");
+      expect(init?.signal).toBeInstanceOf(AbortSignal);
+    }
+  });
+
+  it.each([false, true])(
+    "keeps the saved connection and explains a network failure (expired token: %s)",
+    async (expired) => {
+      await seedTokens(expired ? 1 : Date.now() + 3600_000);
+      const original = await readFile(tokenFile());
+      options.fetch = vi.fn(async () => {
+        throw new TypeError("fetch failed: private-access-token client-secret");
+      });
+      await expect(drive.listSnapshots("project")).rejects.toThrow(
+        "Google Drive could not reach Google's servers",
+      );
+      await expect(drive.listSnapshots("project")).rejects.not.toThrow(
+        "private-access-token",
+      );
+      expect(await readFile(tokenFile())).toEqual(original);
+      expect((await drive.status()).connected).toBe(true);
+      expect(request).not.toHaveBeenCalled();
+    },
+  );
+
+  it("identifies timeouts without exposing transport error details", async () => {
+    await seedTokens();
+    options.fetch = vi.fn(async () => {
+      throw new DOMException("Request aborted", "TimeoutError");
+    });
+    await expect(drive.listSnapshots("project")).rejects.toThrow(
+      "Google Drive request timed out",
+    );
+    expect((await drive.status()).connected).toBe(true);
+  });
   it("reports configuration separately from connection", async () => {
     expect(await drive.status()).toEqual({
       configured: true,
@@ -142,6 +199,14 @@ describe("Google Drive desktop authentication", () => {
         expires_in: 3600,
       });
     });
+    // Authorization must also use the desktop transport rather than Node fetch.
+    options.fetch = request;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(() => {
+        throw new Error("Node transport must not be used");
+      }),
+    );
     expect(await drive.connect()).toEqual({
       configured: true,
       connected: true,

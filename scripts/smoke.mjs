@@ -82,7 +82,7 @@ try {
     await page.waitForFunction(
       (expected) =>
         document.querySelector('select[aria-label="Main document"]')?.value ===
-          expected,
+        expected,
       mainFile,
     );
     assert.equal(await mainDocument.inputValue(), mainFile);
@@ -142,6 +142,53 @@ try {
   );
   assert.equal(Buffer.from(before).subarray(0, 4).toString(), "%PDF");
   console.log("PASS actual Podman compilation and embedded PDF canvas");
+  const checkPdfFillsPane = () =>
+    page.waitForFunction(() => {
+      const viewport = document.querySelector(".pdf-scroll");
+      const canvas = viewport?.querySelector("canvas");
+      if (!canvas || viewport.getAttribute("aria-busy") === "true")
+        return false;
+      const pane = viewport.getBoundingClientRect();
+      const pdf = canvas.getBoundingClientRect();
+      return (
+        Math.abs(pdf.width - viewport.clientWidth) <= 1 &&
+        Math.abs(pdf.left - pane.left) <= 1 &&
+        Math.abs(pdf.top - pane.top) <= 1 &&
+        viewport.scrollWidth <= viewport.clientWidth + 1
+      );
+    });
+  await checkPdfFillsPane();
+  const divider = page.getByRole("separator", {
+    name: "Resize editor and preview",
+    exact: true,
+  });
+  const dividerBox = await divider.boundingBox();
+  const canvasWidth = (await page.locator(".pdf-page canvas").boundingBox())
+    .width;
+  await page.mouse.move(
+    dividerBox.x + dividerBox.width / 2,
+    dividerBox.y + dividerBox.height / 2,
+  );
+  await page.mouse.down();
+  await page.mouse.move(
+    dividerBox.x + dividerBox.width / 2 + 60,
+    dividerBox.y + dividerBox.height / 2,
+    { steps: 8 },
+  );
+  await page.mouse.up();
+  await page.waitForFunction(
+    (previous) =>
+      document.querySelector(".pdf-page canvas")?.getBoundingClientRect()
+        .width <
+      previous - 20,
+    canvasWidth,
+  );
+  await checkPdfFillsPane();
+  await divider.dblclick();
+  await checkPdfFillsPane();
+  console.log(
+    "PASS PDF fills the preview edge-to-edge before and after resizing",
+  );
   await fs.mkdir("test-results", { recursive: true });
   await page.screenshot({ path: "test-results/workspace.png" });
   await page.getByLabel("Auto-compile", { exact: true }).check();
@@ -209,7 +256,8 @@ try {
   );
   console.log("PASS restore records previous work and restores source");
   await page.getByTitle("Project files", { exact: true }).click();
-  await page.getByTitle("Close output", { exact: true }).click();
+  const closeOutput = page.getByTitle("Close output", { exact: true });
+  if (await closeOutput.isVisible()) await closeOutput.click();
   await page.locator(".cm-content").click();
   await page.keyboard.press("ControlOrMeta+Home");
   assert.deepEqual(errors, []);

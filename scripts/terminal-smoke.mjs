@@ -42,7 +42,9 @@ try {
   const root = state.initialProject?.root;
   assert.ok(root && root.startsWith(directory + path.sep));
   const mainFile = path.join(root, "main.tex");
-  await page.evaluate(() => window.typeset.checkpoint("Terminal smoke baseline"));
+  await page.evaluate(() =>
+    window.typeset.checkpoint("Terminal smoke baseline"),
+  );
   const editor = page.locator(".cm-content");
   const terminalToggle = page.locator(".statusbar").getByRole("button", {
     name: "Terminal",
@@ -50,29 +52,38 @@ try {
   });
   await terminalToggle.click();
   await page.locator(".terminal-session-state.running").waitFor();
-  const terminalInput = page.getByLabel("Project terminal input", { exact: true });
+  const terminalInput = page.getByLabel("Project terminal input", {
+    exact: true,
+  });
   const status = () => page.evaluate(() => window.typeset.terminalStatus());
   const initialSession = await status();
   assert.equal(initialSession.root, await fs.realpath(root));
   assert.ok(initialSession.running);
   const powershell = /powershell|pwsh/i.test(initialSession.shell);
-  const writeText = (file, content) => powershell
-    ? `Set-Content -LiteralPath '${file}' -Value '${content}'`
-    : `printf '%s\\n' '${content}' > '${file}'`;
-  const marker = (label) => powershell
-    ? `Write-Output ('${label}_' + 'COMPLETE')`
-    : `printf '${label}_%s\\n' 'COMPLETE'`;
+  const writeText = (file, content) =>
+    powershell
+      ? `Set-Content -LiteralPath '${file}' -Value '${content}'`
+      : `printf '%s\\n' '${content}' > '${file}'`;
+  const marker = (label) =>
+    powershell
+      ? `Write-Output ('${label}_' + 'COMPLETE')`
+      : `printf '${label}_%s\\n' 'COMPLETE'`;
   const queueCommand = async (command) => {
     await terminalInput.focus();
-    await page.keyboard.insertText(command);
+    // Exercise xterm's keyboard handlers; CDP insertText bypasses them.
+    await page.keyboard.type(command);
   };
   const runCommand = async (command, label) => {
     await queueCommand(`${command}; ${marker(label)}`);
     await page.keyboard.press("Enter");
-    return poll(async () => {
+    const completed = await poll(async () => {
       const current = await status();
       return current?.output.includes(`${label}_COMPLETE`) ? current : false;
     }, `${label} shell completion`);
+    // The shell emits its completion marker before restoring its interactive
+    // line editor; allow the prompt to settle before the next simulated input.
+    await new Promise((resolve) => setTimeout(resolve, 250));
+    return completed;
   };
 
   const pwdCommand = powershell
@@ -80,25 +91,36 @@ try {
     : "printf 'PROJECT_ROOT:%s\\n' \"$PWD\"";
   const pwd = await runCommand(pwdCommand, "PWD");
   assert.ok(pwd.output.includes(`PROJECT_ROOT:${await fs.realpath(root)}`));
-  const git = await runCommand("git status --short; git rev-parse --is-inside-work-tree", "GIT");
+  const git = await runCommand(
+    "git status --short; git rev-parse --is-inside-work-tree",
+    "GIT",
+  );
   assert.match(git.output, /\r?\ntrue\r?\n/);
   await page.waitForFunction(() =>
-    document.querySelector(".xterm-accessibility-tree")?.textContent?.includes("GIT_COMPLETE"),
+    document
+      .querySelector(".xterm-accessibility-tree")
+      ?.textContent?.includes("GIT_COMPLETE"),
   );
   console.log("PASS real terminal starts in the project and runs pwd/Git");
 
   await runCommand(
-    powershell ? "$env:TYPESET_SMOKE_SESSION='preserved'" : "export TYPESET_SMOKE_SESSION=preserved",
+    powershell
+      ? "$env:TYPESET_SMOKE_SESSION='preserved'"
+      : "export TYPESET_SMOKE_SESSION=preserved",
     "SESSION_SET",
   );
-  await page.getByRole("button", { name: "Hide terminal", exact: true }).click();
+  await page
+    .getByRole("button", { name: "Hide terminal", exact: true })
+    .click();
   assert.equal(await page.locator(".terminal-panel").isVisible(), false);
   assert.equal(await page.locator(".terminal-emulator .xterm").count(), 1);
   await terminalToggle.click();
   await page.locator(".terminal-panel").waitFor({ state: "visible" });
   assert.equal((await status()).id, initialSession.id);
   const preserved = await runCommand(
-    powershell ? "Write-Output ('PERSIST:' + $env:TYPESET_SMOKE_SESSION)" : "printf 'PERSIST:%s\\n' \"$TYPESET_SMOKE_SESSION\"",
+    powershell
+      ? "Write-Output ('PERSIST:' + $env:TYPESET_SMOKE_SESSION)"
+      : "printf 'PERSIST:%s\\n' \"$TYPESET_SMOKE_SESSION\"",
     "SESSION_CHECK",
   );
   assert.ok(preserved.output.includes("PERSIST:preserved"));
@@ -111,9 +133,15 @@ try {
     "FILES",
   );
   await page.locator('.tree-file[title="terminal-created.tex"]').waitFor();
-  await page.waitForFunction((expected) => document.querySelector(".cm-content")?.textContent?.includes(expected), externalText);
+  await page.waitForFunction(
+    (expected) =>
+      document.querySelector(".cm-content")?.textContent?.includes(expected),
+    externalText,
+  );
   assert.equal((await fs.readFile(mainFile, "utf8")).trim(), externalText);
-  console.log("PASS terminal file creation and clean editor changes refresh automatically");
+  console.log(
+    "PASS terminal file creation and clean editor changes refresh automatically",
+  );
 
   const freshText = "% Fresh editor text saved before terminal Enter.\n";
   const readCommand = powershell
@@ -124,9 +152,17 @@ try {
   assert.notEqual(await fs.readFile(mainFile, "utf8"), freshText);
   await terminalInput.focus();
   await page.keyboard.press("Enter");
-  await poll(async () => (await status())?.output.includes("FRESH_COMPLETE"), "save-before-command output");
-  assert.equal(await fs.readFile(path.join(root, "saved-before-enter.tex"), "utf8"), freshText);
-  console.log("PASS terminal Enter saves a pending editor buffer before executing");
+  await poll(
+    async () => (await status())?.output.includes("FRESH_COMPLETE"),
+    "save-before-command output",
+  );
+  assert.equal(
+    await fs.readFile(path.join(root, "saved-before-enter.tex"), "utf8"),
+    freshText,
+  );
+  console.log(
+    "PASS terminal Enter saves a pending editor buffer before executing",
+  );
 
   const localCopy = "% Local changes that must survive an external edit.\n";
   const diskCopy = "% Independently changed on disk.\n";
@@ -135,15 +171,29 @@ try {
   await page.locator(".external-change-banner").waitFor();
   assert.ok((await editor.textContent()).includes(localCopy.trim()));
   assert.equal(await fs.readFile(mainFile, "utf8"), diskCopy);
-  await page.getByRole("button", { name: "Save edits as copy", exact: true }).click();
-  await page.getByRole("dialog").getByLabel("Name", { exact: true }).fill("main.local.tex");
+  await page
+    .getByRole("button", { name: "Save edits as copy", exact: true })
+    .click();
+  await page
+    .getByRole("dialog")
+    .getByLabel("Name", { exact: true })
+    .fill("main.local.tex");
   await page.getByRole("button", { name: "Save copy", exact: true }).click();
   await page.getByRole("dialog").waitFor({ state: "hidden" });
-  await page.waitForFunction(() => document.querySelector(".file-tab.active")?.textContent?.includes("main.local.tex"));
-  assert.equal(await fs.readFile(path.join(root, "main.local.tex"), "utf8"), localCopy);
+  await page.waitForFunction(() =>
+    document
+      .querySelector(".file-tab.active")
+      ?.textContent?.includes("main.local.tex"),
+  );
+  assert.equal(
+    await fs.readFile(path.join(root, "main.local.tex"), "utf8"),
+    localCopy,
+  );
   assert.equal(await fs.readFile(mainFile, "utf8"), diskCopy);
   assert.equal(await page.locator(".external-change-banner").count(), 0);
-  console.log("PASS conflicting editor/disk edits are preserved and Save edits as copy retains both");
+  console.log(
+    "PASS conflicting editor/disk edits are preserved and Save edits as copy retains both",
+  );
 
   await page.locator('.tree-file[title="main.tex"]').click();
   const secondLocal = "% Another unsaved editor change.\n";
@@ -153,21 +203,67 @@ try {
   await page.locator(".external-change-banner").waitFor();
   assert.ok((await editor.textContent()).includes(secondLocal.trim()));
   assert.equal(await fs.readFile(mainFile, "utf8"), secondDisk);
-  await page.getByRole("button", { name: "Use disk version", exact: true }).click();
+  await page
+    .getByRole("button", { name: "Use disk version", exact: true })
+    .click();
   await page.locator(".external-change-banner").waitFor({ state: "hidden" });
   assert.ok((await editor.textContent()).includes(secondDisk.trim()));
   assert.equal(await fs.readFile(mainFile, "utf8"), secondDisk);
-  console.log("PASS Use disk version explicitly resolves a second edit conflict");
+  console.log(
+    "PASS Use disk version explicitly resolves a second edit conflict",
+  );
 
-  await page.getByRole("button", { name: "Restart terminal", exact: true }).click();
+  const processEnded = (pid) => {
+    try {
+      process.kill(pid, 0);
+      return false;
+    } catch (error) {
+      if (error.code === "ESRCH") return true;
+      throw error;
+    }
+  };
+  let backgroundPid;
+  if (!powershell) {
+    await queueCommand("printf 'LONG_%s\\n' RUNNING; sleep 30");
+    await page.keyboard.press("Enter");
+    await poll(
+      async () => (await status())?.output.includes("LONG_RUNNING"),
+      "foreground command startup",
+    );
+    await page.keyboard.press("Control+c");
+    await new Promise((resolve) => setTimeout(resolve, 250));
+    await runCommand("true", "INTERRUPTED");
+    console.log("PASS Control+C interrupts a command without ending the shell");
+    await runCommand(
+      "sleep 60 & printf '%s\\n' $! > terminal-child.pid",
+      "BACKGROUND",
+    );
+    backgroundPid = Number(
+      (await fs.readFile(path.join(root, "terminal-child.pid"), "utf8")).trim(),
+    );
+    assert.ok(backgroundPid > 1 && !processEnded(backgroundPid));
+  }
+
+  await page
+    .getByRole("button", { name: "Restart terminal", exact: true })
+    .click();
   const restarted = await poll(async () => {
     const current = await status();
-    return current?.running && current.id !== initialSession.id ? current : false;
+    return current?.running && current.id !== initialSession.id
+      ? current
+      : false;
   }, "a new terminal session");
   await page.locator(".terminal-session-state.running").waitFor();
   assert.notEqual(restarted.pid, initialSession.pid);
+  if (backgroundPid)
+    await poll(
+      () => processEnded(backgroundPid),
+      "background job cleanup on restart",
+    );
   const reset = await runCommand(
-    powershell ? "Write-Output ('AFTER_RESTART:' + $env:TYPESET_SMOKE_SESSION)" : "printf 'AFTER_RESTART:%s\\n' \"${TYPESET_SMOKE_SESSION-unset}\"",
+    powershell
+      ? "Write-Output ('AFTER_RESTART:' + $env:TYPESET_SMOKE_SESSION)"
+      : "printf 'AFTER_RESTART:%s\\n' \"${TYPESET_SMOKE_SESSION-unset}\"",
     "RESTART",
   );
   assert.ok(!reset.output.includes("PERSIST:preserved"));
@@ -177,10 +273,66 @@ try {
   assert.deepEqual(errors, []);
   await fs.mkdir("test-results", { recursive: true });
   await page.screenshot({ path: "test-results/terminal-smoke.png" });
-  console.log("PASS no renderer errors; screenshot saved to test-results/terminal-smoke.png");
+  console.log(
+    "PASS no renderer errors; screenshot saved to test-results/terminal-smoke.png",
+  );
+
+  const otherRoot = path.join(directory, "Second terminal project");
+  await fs.mkdir(otherRoot);
+  await fs.writeFile(
+    path.join(otherRoot, "main.tex"),
+    "% Second disposable project.\n",
+  );
+  await application.evaluate(({ dialog, Menu }, folder) => {
+    dialog.showOpenDialog = async () => ({
+      canceled: false,
+      filePaths: [folder],
+    });
+    const file = Menu.getApplicationMenu().items.find(
+      (item) => item.label === "File",
+    );
+    file.submenu.items.find((item) => item.label === "Open project…").click();
+  }, otherRoot);
+  await page.waitForFunction(
+    () =>
+      document.querySelector("h1")?.textContent === "Second terminal project",
+  );
+  assert.equal(await page.locator(".terminal-panel").count(), 0);
+  assert.equal(await status(), null);
+  if (!powershell)
+    await poll(
+      () => processEnded(restarted.pid),
+      "old shell cleanup after project switch",
+    );
+  await assert.rejects(
+    page.evaluate(
+      (id) => window.typeset.terminalWrite(id, "pwd\r"),
+      restarted.id,
+    ),
+    /different project or session/,
+  );
+  await terminalToggle.click();
+  await page.locator(".terminal-session-state.running").waitFor();
+  assert.equal((await status()).root, otherRoot);
+  const switched = await runCommand(pwdCommand, "SWITCHED");
+  assert.ok(switched.output.includes(`PROJECT_ROOT:${otherRoot}`));
+  assert.deepEqual(errors, []);
+  console.log(
+    "PASS project switching stops the old shell and rejects stale input",
+  );
 } catch (error) {
+  console.error(
+    "Terminal output at failure:",
+    (
+      await page
+        ?.evaluate(() => window.typeset.terminalStatus())
+        .catch(() => null)
+    )?.output.slice(-2500),
+  );
   await fs.mkdir("test-results", { recursive: true });
-  await page?.screenshot({ path: "test-results/terminal-smoke-failure.png" }).catch(() => {});
+  await page
+    ?.screenshot({ path: "test-results/terminal-smoke-failure.png" })
+    .catch(() => {});
   throw error;
 } finally {
   await application.close();

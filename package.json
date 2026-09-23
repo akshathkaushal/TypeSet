@@ -15,6 +15,8 @@
     "start": "electron .",
     "test": "vitest run",
     "test:desktop": "node scripts/smoke.mjs",
+    "test:terminal": "node scripts/terminal-smoke.mjs",
+    "test:layout": "node scripts/layout-smoke.mjs",
     "typecheck": "tsc --noEmit",
     "package": "pnpm build && electron-builder --dir",
     "dist": "pnpm build && electron-builder",
@@ -56,6 +58,7 @@
   "build": {
     "appId": "org.typeset.desktop",
     "productName": "Typeset",
+    "npmRebuild": false,
     "directories": {
       "output": "release"
     },

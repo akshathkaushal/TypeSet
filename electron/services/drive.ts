@@ -17,6 +17,8 @@ export interface DriveOptions {
   encrypt: (text: string) => Buffer;
   decrypt: (data: Buffer) => string;
   openExternal: (url: string) => Promise<void>;
+  // The desktop supplies Electron's network stack so OS proxy/PAC settings apply.
+  fetch?: (url: string, init?: RequestInit) => Promise<Response>;
 }
 
 interface Tokens {
@@ -66,6 +68,26 @@ export class DriveService {
   }
 
   constructor(private readonly options: DriveOptions) {}
+
+  private async fetchGoogle(url: string, init: RequestInit): Promise<Response> {
+    try {
+      return await (this.options.fetch ?? globalThis.fetch)(url, {
+        ...init,
+        credentials: "omit",
+      });
+    } catch (error) {
+      const name = error instanceof Error ? error.name : "";
+      const timeout =
+        init.signal?.aborted ||
+        name === "TimeoutError" ||
+        name === "AbortError";
+      throw new Error(
+        timeout
+          ? "The Google Drive request timed out. Check your network, proxy, or VPN connection, then try again. Your local project is unchanged."
+          : "Google Drive could not reach Google's servers. Check your network, proxy, or VPN connection, then try again. Your local project is unchanged.",
+      );
+    }
+  }
 
   private credentials(): { clientId: string; clientSecret: string } {
     const credentials = this.options.getCredentials();
@@ -253,7 +275,7 @@ export class DriveService {
       }).toString();
       await this.options.openExternal(auth.toString());
       const code = await codePromise;
-      const response = await fetch(TOKEN_URL, {
+      const response = await this.fetchGoogle(TOKEN_URL, {
         method: "POST",
         body: new URLSearchParams({
           client_id: clientId,
@@ -311,7 +333,7 @@ export class DriveService {
     if (tokens) {
       // Clearing the local connection always succeeds, including while offline.
       try {
-        await fetch("https://oauth2.googleapis.com/revoke", {
+        await this.fetchGoogle("https://oauth2.googleapis.com/revoke", {
           method: "POST",
           body: new URLSearchParams({ token: tokens.refreshToken }),
           signal: AbortSignal.timeout(10_000),
@@ -328,7 +350,7 @@ export class DriveService {
     const generation = this.generation;
     const operation = (async () => {
       const { clientId, clientSecret } = this.credentials();
-      const response = await fetch(TOKEN_URL, {
+      const response = await this.fetchGoogle(TOKEN_URL, {
         method: "POST",
         body: new URLSearchParams({
           client_id: clientId,
@@ -383,7 +405,7 @@ export class DriveService {
     const run = (accessToken: string) => {
       const headers = new Headers(init.headers);
       headers.set("Authorization", `Bearer ${accessToken}`);
-      return fetch(url, {
+      return this.fetchGoogle(url, {
         ...init,
         headers,
         signal: AbortSignal.timeout(90_000),

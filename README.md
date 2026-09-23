@@ -1,6 +1,9 @@
+<<<<<<< HEAD
 # TypeSet
 Opensource Latex based editor
 =======
+=======
+>>>>>>> 7a7ba0e (Added terminal support)
 # Typeset
 
 A free, local LaTeX desktop workspace: edit source files, compile with TeX Live, and read the PDF beside your document. Save named versions with Git, push them to GitHub, or back up project snapshots to Google Drive.
@@ -45,6 +48,7 @@ This builds `localhost/typeset-tex:1` from `compiler/Containerfile`. The `docker
 
 ## Write and compile
 
+- Drag the dividers beside the sidebar, between the editor and PDF preview, and above the terminal or compilation output to resize the workspace. Sizes are remembered between launches. Double-click a divider to reset it; a focused divider also supports arrow keys (Shift for larger steps), Home/End, and Enter to reset.
 - Use the project menu to create a project, open a folder, import a ZIP, or clone a GitHub repository. Projects contain ordinary `.tex`, `.bib`, image, and other source files.
 - Use the file sidebar to add files/folders, import assets, rename files, or move files to the operating system's Trash. The editor includes LaTeX highlighting, completion, folding, undo, and find/replace.
 - Edits autosave after a brief pause. **Cmd/Ctrl+S** saves immediately. The save indicator shows whether work is saved or a write failed.
@@ -139,6 +143,8 @@ Current size limits include 5 MB per editable text file, 20 MB per imported asse
 | `pnpm typecheck`          | Check TypeScript                                     |
 | `pnpm test`               | Run service tests with Vitest                        |
 | `pnpm test:desktop`       | Exercise the built app in a real Electron window     |
+| `pnpm test:terminal`      | Exercise the real terminal and external file changes |
+| `pnpm test:layout`        | Check pane dragging, keyboard resizing, and saved sizes |
 | `pnpm build`              | Typecheck and build renderer/main/preload bundles    |
 | `pnpm start`              | Open the built desktop app                           |
 | `pnpm package`            | Build an unpacked platform application in `release/` |
@@ -150,7 +156,11 @@ The real compiler smoke check needs a running Podman engine and the image alread
 
 Run `pnpm build` before `pnpm test:desktop`, with Podman running and the compiler image ready. The desktop smoke check uses a temporary user-data directory and exercises file creation, autosave, rename, main-document selection, Git checkpoints/restoration, real compilation, PDF display, auto-compile, and error handling. Its screenshot is written to `test-results/desktop-smoke.png`. Development validation on macOS has passed TypeScript/build, service regression tests, the complete Electron desktop smoke workflow, and real compiler checks with all three LaTeX engines; native Windows/Linux validation remains outstanding.
 
+Run `pnpm test:terminal` after building to check a real shell and Git commands, session persistence/restart, saving before commands, and recovery from external file conflicts. It uses a disposable project and needs neither Podman nor a GitHub account. Set `TYPESET_EXECUTABLE` to a packaged executable to test that build instead.
+
 Build and test desktop packages on each target operating system. Configured outputs are DMG/ZIP on macOS, NSIS/portable on Windows, and AppImage/DEB on Linux. The Podman image is portable; desktop executables and installers are platform-specific. macOS desktop checks do not establish Windows/Linux compatibility, and those platforms still need native testing.
+
+The terminal dependency uses Node-API binaries installed by `pnpm install`; packaging reuses them without downloading Electron headers for another rebuild. The build prepares executable permissions for the PTY helper and keeps the native terminal module outside the application archive. Run the terminal smoke check against each packaged target to verify its native binary.
 
 No paid signing credentials, notarization, app-store account, or automatic-update service are configured. Local builds remain free. Downloaded unsigned or ad-hoc-signed applications can require manual OS approval, and macOS credential storage may ask for permission after rebuilding. See [Electron's distribution guidance](https://www.electronjs.org/docs/latest/tutorial/code-signing).
 

@@ -390,6 +390,7 @@ async function main() {
     },
     decrypt: (data) => safeStorage.decryptString(data),
     openExternal: (url) => shell.openExternal(url),
+    fetch: (url, init) => net.fetch(url, init),
   });
   protocol.handle("typeset", (request) => {
     const url = new URL(request.url);
@@ -555,5 +556,7 @@ app.on("will-quit", (event) => {
   void terminal
     .dispose()
     .catch(() => {})
-    .finally(() => app.quit());
+    // Even an unused terminal resolves asynchronously. Let Electron finish
+    // cancelling this quit before requesting the next one.
+    .finally(() => setImmediate(() => app.quit()));
 });

@@ -146,7 +146,7 @@ export default function PdfViewer({
       const pdfPage = await pdf.getPage(Math.min(page, pdf.numPages));
       if (cancelled) return;
       const normal = pdfPage.getViewport({ scale: 1 });
-      const scale = zoom ?? Math.max(0.1, (width - 56) / normal.width);
+      const scale = zoom ?? Math.max(0.1, width / normal.width);
       const viewport = pdfPage.getViewport({ scale });
       const density = Math.min(window.devicePixelRatio || 1, 2);
       const canvas = document.createElement("canvas");
